@@ -1,0 +1,358 @@
+---
+title: "Tool_box"
+author: "Kai Tien Lin"
+date: "4/26/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Online Retail
+The “Online Retail” data set is about a gift set ecommerce website based in United Kingdom that has sold their merchandise all around the world via Internet. From the data set, each purchase of an item is recorded as one entry starting 12/1/2010 until 12/9/2011. 
+
+##Problem
+As its business growing, the company would like to find out which country is worth them to build a distribution center. Also, they would like to catergorize their top selling product for better inventory planning.
+
+##Download Dataset
+
+Download dataset from the [UCI Machine Learning Repository](https://archive.ics.uci.edu/ml/datasets/Online+Retail) called [**Online Retail**](https://archive.ics.uci.edu/ml/machine-learning-databases/00352/Online%20Retail.xlsx).
+Every entry variables include attribute as following: `Invoice number`, `Stock Code`, `Item Description`,`Quantity purchase`, `Invoice date`, `Unit Price`, `Customer ID` and `Country` which it sold to. The original data set has 541,909 rows, to use less data entry but still run a meaningful analysis; I have compared the each country’s purchases units between all customer and only valid CustomerID purchased. 
+
+##Load Package
+
+Load the package that need for following analysis:
+```{r message = FALSE}
+library(dplyr)
+library(tidyr)
+library(readxl)
+library(httr)
+library(ggplot2)
+library(scales)
+library(tidytext) 
+library(magrittr)
+```
+
+##Load dataset
+```{r}
+url <-"https://archive.ics.uci.edu/ml/machine-learning-databases/00352/Online%20Retail.xlsx"
+GET(url, write_disk("Online%20Retail.xlsx", overwrite=TRUE))
+test <- read_excel("Online%20Retail.xlsx")
+head(test, 3) #take a look at first 3 row
+```
+##Clean dataset
+First Step we have to check transform each variable's class
+```{r}
+indx <- sapply(test, is.factor)
+test[indx] <- lapply(test[indx], function(x) as.character(x))
+```
+
+if not numric, transform
+```{r}
+numcolumn<-c("Quantity","UnitPrice","StockCode","CustomerID")
+test[numcolumn] <- lapply(test[numcolumn], function(x) as.numeric(x))
+```
+
+Take out Rows with NA but leave No Customer ID item by assigning *0* ID to it
+```{r}
+test$CustomerID[is.na(test$CustomerID)]<-0
+test<-subset(test,complete.cases(test))
+```
+
+Factor level assign to `Country` column
+```{r}
+test$Country<-as.factor(test$Country)
+```
+
+Add column for total sales
+```{r}
+test<-test%>%filter(UnitPrice>0 & Quantity>0)%>%
+  mutate(Sales=Quantity*UnitPrice)
+```
+
+Assign Month
+```{r}
+tmp<-as.Date(test$InvoiceDate,'%Y-%m-%d %H:%M:%S')
+test$month<-format(tmp,'%m')
+```
+
+##Analysis Data
+Find best Selling Country
+```{r}
+test%>%
+group_by(Country)%>%
+summarize(Total_Sale=sum(Sales))%>%
+  ungroup()%>%
+  arrange(desc(Total_Sale))
+```
+```{r echo=FALSE}
+test%>%
+group_by(Country)%>%
+summarize(Total_Sale=sum(Sales))%>%
+  ggplot(aes(x=Country,y=Total_Sale))+geom_bar(stat = "identity")+
+  scale_y_continuous(labels = comma)+coord_flip()
+```
+
+Take out `United Kingdom` from the selling data to zoom in the sales in other countries
+```{r}
+test%>%
+group_by(Country)%>%
+  filter(Country!="United Kingdom")%>%
+  summarize(Total_Sale=sum(Sales))%>%
+  ungroup()%>%
+  arrange(desc(Total_Sale))
+```
+```{r echo=FALSE}
+test%>%
+  group_by(Country)%>%
+  filter(Country!="United Kingdom")%>%
+  summarize(Total_Sale=sum(Sales))%>%
+  ggplot(aes(x=Country,y=Total_Sale))+geom_bar(stat = "identity")+
+  scale_y_continuous(labels = comma)+coord_flip()
+
+```
+
+In order to zoom into the countries that has higher impact with our business, we take a look at all selling dollar and selling with customer ID without United Kingdom
+```{r}
+#All
+Sales_all<-test%>%
+  group_by(Country)%>%
+  filter(Country!="United Kingdom")%>%
+  summarize(Total_Sale=sum(Sales))%>%
+  ungroup()%>%
+  arrange(desc(Total_Sale))
+
+#Customer ID Only
+Sales_member<-test%>%
+  group_by(Country)%>%
+  filter(Country!="United Kingdom")%>%
+  filter(CustomerID>0)%>%
+  summarize(Total_Sale=sum(Sales))%>%
+  ungroup()%>%
+  arrange(desc(Total_Sale))
+
+Sales_member$Country[1:10] %in% Sales_all$Country[1:10]
+#if top10 ranking matched
+
+Quant_all<-test%>%
+  group_by(Country)%>%
+  filter(Country!="United Kingdom")%>%
+  summarize(Total_Quantity=sum(Quantity))%>%
+  ungroup()%>%
+  arrange(desc(Total_Quantity))
+
+Quant_member<-test%>%
+  group_by(Country)%>%
+  filter(Country!="United Kingdom")%>%
+  filter(CustomerID>0)%>%
+  summarize(Total_Quantity=sum(Quantity))%>%
+  ungroup()%>%
+  arrange(desc(Total_Quantity))
+
+Quant_member$Country[1:10] %in% Quant_all$Country[1:10]
+
+#if top10 Quant and Sales ranking matched
+Quant_member$Country[1:10] %in% Sales_member$Country[1:10]
+
+```
+
+Therefore, we can built the distribution center at below places:
+```{r}
+Top10<-Quant_all$Country[1:10]
+Top10<-as.character(Top10)
+Top10
+```
+
+Also,we can see the top selling dollar and top selling quantity countrise are very identical, so we can zoom in into selling with only customer ID entry for further inventory analysis.
+
+```{r echo=FALSE}
+test%>%
+  group_by(Country)%>%
+  filter(Country%in%Top10)%>%
+  filter(CustomerID>0)%>%
+  summarize(Total_Sale=sum(Sales))%>%
+  ungroup()%>%
+  arrange(desc(Total_Sale))%>%
+  ggplot(aes(x=Country,y=Total_Sale))+geom_bar(stat = "identity")+
+  scale_y_continuous(labels = comma)+coord_flip()+ggtitle("Total Sales made by Members")
+
+test%>%
+  group_by(Country)%>%
+  filter(Country%in%Top10)%>%
+  filter(CustomerID>0)%>%
+  summarize(Total_Quantity=sum(Quantity))%>%
+  ungroup()%>%
+  arrange(desc(Total_Quantity))%>%
+  ggplot(aes(x=Country,y=Total_Quantity))+geom_bar(stat = "identity")+
+  scale_y_continuous(labels = comma)+coord_flip()+ggtitle("Total_Quantity purchased by Members")
+```
+
+Pull the dataset as Customer ID only
+```{r}
+test<-filter(test,CustomerID>0)
+```
+
+After found the top 10 countries that we can build distribution center, let's use the text mining to find inventory planning for Top 10 selling category items.
+
+```{r}
+Des_df<-data_frame("Des"=test$Description,"Quant"=test$Quantity)
+Des_tidy<-Des_df %>% unnest_tokens(word, Des)
+
+Des_tidy%>%
+  count(word, sort = TRUE)%>%filter(n > 10000) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n))+
+  geom_col()+xlab(NULL)+coord_flip()
+```
+
+From the bar chart, we can see set, bag and box are category name for top 10 repeated words in sales last year. 
+
+But, the most repeated word doesn't mean the best selling and profitable items. Therefore, we set up two dataframe, one is top selling quantity word and the other is top reapted words.
+```{r}
+Des_count<-Des_tidy%>%filter(!grepl('the|of',word))%>%
+  count(word, sort = TRUE)%>%
+  mutate(word = reorder(word, n))%>%
+  filter(n > 10000)
+Des_count$word<-as.character(Des_count$word)
+Des_Quant<-Des_tidy%>%group_by(word)%>%filter(!grepl('the|of',word))%>%
+  summarize(Total_Quantity=sum(Quant))%>%filter(Total_Quantity>200000)
+Des_comb<-merge(Des_count,Des_Quant,by="word",all=TRUE)
+arrange(Des_comb,desc(Total_Quantity,n))
+
+
+```
+
+Now, we add a new column `Cat` and assigning category for populor items:
+```{r}
+Top_item<-test
+Top_item<-filter(Top_item,Top_item$Quantity>0)
+Top_item$Cat<-ifelse(grepl("BAG",Top_item$Description),"BAG",
+                    ifelse(grepl("BOX",Top_item$Description),"BOX",
+                    ifelse(grepl("CHRISTMAS",Top_item$Description),"CHRISTMAS",
+                    ifelse(grepl("CASES",Top_item$Description),"CASES",
+                    ifelse(grepl("SET",Top_item$Description),"SET",
+                    ifelse(grepl("BOTTLE",Top_item$Description),"BOTTLE","OTHER"))))))
+
+```
+
+However, we have to consider the set and box are perhaps a kind of items sold at bundle. 
+In order to quicly take a look into our data, we can write a function called `finditem` for looking for best selling keyword item.
+```{r}
+finditem<-function(x,y){
+  x%>%filter(grepl(y,Description,ignore.case = TRUE))%>%group_by(Description,Cat)%>%
+    summarize(Total_Quantity=sum(Quantity))%>%
+    arrange(desc(Total_Quantity))
+}
+```
+For example:
+```{r}
+finditem(Top_item,"set")
+```
+
+So we can see there are sets of Jars, Napkins, Paints and Cases are sold in set are polpular.
+
+Also, The pie chart below shows we have not assign even half of items
+```{r echo=FALSE}
+Top_item%>%
+  group_by(Country,Cat)%>%
+  filter(Country!="United Kingdom")%>%
+  summarize(Total_Quantity=sum(Quantity))%>%
+  ggplot(aes(x=1,y=Total_Quantity,fill=Cat))+geom_bar(stat = "identity")+coord_polar("y", start=0)
+
+```
+
+Take a look at items in *Other* category
+```{r}
+Top_item%>%
+  group_by(Description)%>%
+  filter(Cat=="OTHER")%>%
+  summarize(Total_Quantity=sum(Quantity))%>%arrange(desc(Total_Quantity))
+
+finditem(Top_item,"tissues")
+finditem(Top_item,"light")
+```
+
+Add more category
+```{r}
+Top_item$Cat<-ifelse(grepl("LUNCH",Top_item$Description),"LUNCH BOX/BAG",
+                    ifelse(grepl("BAG",Top_item$Description),"BAG",
+                    ifelse(grepl("BOX",Top_item$Description),"BOX",
+                    ifelse(grepl("CHRISTMAS",Top_item$Description),"CHRISTMAS",
+                    ifelse(grepl("PAINT",Top_item$Description),"PAINTS",
+                    ifelse(grepl("CASES",Top_item$Description),"CASES",
+                    ifelse(grepl("NAPKINS",Top_item$Description),"NAPKINS",
+                    ifelse(grepl("CARD",Top_item$Description),"CARD",
+                    ifelse(grepl("HOLDER",Top_item$Description),"HOLDER",
+                    ifelse(grepl("LIGHT",Top_item$Description),"LIGHT",
+                    ifelse(grepl("LANTERN",Top_item$Description),"LANTERN",
+                    ifelse(grepl("BOTTLE",Top_item$Description),"BOTTLE",
+                    ifelse(grepl("PLASTERS",Top_item$Description),"PLASTERS",
+                    ifelse(grepl("TISSUES",Top_item$Description),"TISSUES",
+                    ifelse(grepl("STICKERS",Top_item$Description),"STICKERS",
+                    ifelse(grepl("GLIDERS",Top_item$Description),"GLIDERS",
+                    ifelse(grepl("VINTAGE",Top_item$Description),"VINTAGE","OTHER")))))))))))))))))
+
+```
+
+The pie chart below shows we have assign category to at least half of items
+```{r echo=FALSE}
+Top_item%>%
+  group_by(Country,Cat)%>%
+  filter(Country!="United Kingdom")%>%
+  summarize(Total_Quantity=sum(Quantity))%>%
+  ggplot(aes(x=1,y=Total_Quantity,fill=Cat))+geom_bar(stat = "identity")+coord_polar("y", start=0)
+
+```
+
+Finaly, filter out `Other` category for further analysis.
+```{r}
+Top_item<-filter(Top_item,Cat!="OTHER")
+```
+
+##Budget Allocation and Inventory Planning
+Take a look every category's sales in different month
+```{r echo=FALSE}
+Top_item%>%
+  group_by(Cat,month)%>%
+  summarize(Total_Quantity=sum(Quantity))%>%
+  ggplot(aes(x=month,y=Total_Quantity,group=Cat,fill=Cat))+geom_bar(stat = "identity",position = "dodge")
+```
+
+We can see 'bag' has rather stable sales but `Christmas` item start pick up in September and reach the huge peak in November.
+
+Take a look `bag` in different country
+```{r}
+Top_item%>%
+  group_by(Cat,month)%>%
+  filter(Cat=="BAG")%>%
+  summarize(Total_Quantity=sum(Quantity))%>%
+  ggplot(aes(x=month,y=Total_Quantity,group=Cat,fill=Cat))+geom_bar(stat = "identity",position = "dodge")
+
+
+```
+
+Take a look into lunch box category in different country
+```{r}
+#United Kingdom
+Top_item%>%
+  group_by(month)%>%
+  filter(Country=="United Kingdom")%>%
+  filter(Cat=="BAG")%>%
+  summarize(Total_Quantity=sum(Quantity))%>%
+  ggplot(aes(x=month,y=Total_Quantity,fill=month))+geom_bar(stat = "identity",position = "dodge")+ggtitle("Lunch Box in United Kindom")
+
+#Other Countries we are looking to build distribution center
+  Top_item%>%
+  group_by(Country,month)%>%
+  filter(Country%in%Top10)%>%
+  filter(Cat=="BAG")%>%
+  summarize(Total_Quantity=sum(Quantity))%>%
+  ggplot(aes(x=month,y=Total_Quantity,fill=month))+geom_bar(stat = "identity",position = "dodge")+
+  facet_wrap(~Country,ncol=5)+ggtitle("Lunch Box in Top 10 Selling Country")
+
+```
+
+
+
+From the above analysis, it gives a discriptive data plot for us to see the business in different country and help us understand how can we manage it, such as building distribution center, inventory planning and budget allocation. The data analytic and studies provide business insight that help the company shape their future.
